@@ -217,27 +217,86 @@ function drawFooter(page, font, text) {
   page.drawText(text, { x, y, size, font, color: INK, rotate: degrees(rot) })
 }
 
+// Page plan shared by the UI manifest and the generator: cover, optional index, then documents.
+export function planPackage(pageCounts, withIndex) {
+  let next = withIndex ? 3 : 2
+  const ranges = pageCounts.map((n) => {
+    const range = { start: next, end: next + n - 1 }
+    next += n
+    return range
+  })
+  return { indexPage: withIndex ? 2 : null, ranges, sourcePages: next - (withIndex ? 3 : 2), total: next - 1 }
+}
+
+// A label is plain text (Helvetica) or a pre-rendered image { png, width, height } in points.
+async function drawLabel(out, page, label, x, y, size, font, color) {
+  if (typeof label === 'string') {
+    page.drawText(label, { x, y, size, font, color })
+    return
+  }
+  const img = await out.embedPng(label.png)
+  // Images are rendered with descender room; sit them on the text baseline.
+  page.drawImage(img, { x, y: y - label.height * 0.28, width: label.width, height: label.height })
+}
+
+async function drawIndex(out, page, fonts, tender, index, entries) {
+  const { regular, bold } = fonts
+  const [W, H] = A4
+  const M = 56
+  let y = H - M
+  page.drawRectangle({ x: 0, y: H - 8, width: W, height: 8, color: ACCENT })
+  page.drawText(safeText(bold, tender.tender_id), { x: M, y: y - 10, size: 10, font: bold, color: ACCENT })
+  y -= 44
+  await drawLabel(out, page, index.heading, M, y, 20, bold, INK)
+  y -= 34
+  const colStart = W - M - 70
+  const rowH = Math.min(22, (y - 70) / Math.max(1, entries.length + 1))
+  const size = Math.min(11, rowH * 0.55)
+  page.drawText('#', { x: M, y, size: size - 1, font: bold, color: MUTED })
+  await drawLabel(out, page, index.columns.document, M + 26, y, size - 1, bold, MUTED)
+  await drawLabel(out, page, index.columns.start, colStart, y, size - 1, bold, MUTED)
+  y -= size * 0.7
+  page.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 0.5, color: RULE })
+  for (let i = 0; i < entries.length; i++) {
+    y -= rowH
+    const e = entries[i]
+    page.drawText(String(i + 1), { x: M, y, size, font: bold, color: INK })
+    const label = index.labels[i]
+    if (typeof label === 'string') {
+      const line = wrap(regular, safeText(regular, label), size, colStart - M - 40)[0]
+      page.drawText(line, { x: M + 26, y, size, font: regular, color: INK })
+    } else {
+      await drawLabel(out, page, label, M + 26, y, size, regular, INK)
+    }
+    page.drawText(String(e.start), { x: colStart, y, size, font: bold, color: INK })
+  }
+}
+
 // documents: [{ title, fileName, bytes }] already in final order.
-export async function buildPackage(tender, documents) {
+// options.index: null, or { heading, columns: { document, start }, labels[] } (labels are text or images).
+export async function buildPackage(tender, documents, options = {}) {
   const out = await PDFDocument.create()
   const regular = await out.embedFont(StandardFonts.Helvetica)
   const bold = await out.embedFont(StandardFonts.HelveticaBold)
   out.setTitle(`${tender.tender_id} Submission Package`)
   out.setProducer('Tender Document Package Builder')
 
+  const withIndex = !!options.index
   const cover = out.addPage(A4)
-  const entries = []
-  let next = 2
+  const indexPage = withIndex ? out.addPage(A4) : null
+  const sources = []
   for (const doc of documents) {
     const src = await PDFDocument.load(doc.bytes, { updateMetadata: false })
     const copied = await out.copyPages(src, src.getPageIndices())
     copied.forEach((p) => out.addPage(p))
-    entries.push({ title: doc.title, fileName: doc.fileName, start: next, end: next + copied.length - 1 })
-    next += copied.length
+    sources.push(copied.length)
   }
+  const plan = planPackage(sources, withIndex)
+  const entries = documents.map((doc, i) => ({ title: doc.title, fileName: doc.fileName, ...plan.ranges[i] }))
 
   const generatedOn = todayIso()
   drawCover(cover, { regular, bold }, tender, entries, generatedOn)
+  if (indexPage) await drawIndex(out, indexPage, { regular, bold }, tender, options.index, entries)
 
   const pages = out.getPages()
   const total = pages.length

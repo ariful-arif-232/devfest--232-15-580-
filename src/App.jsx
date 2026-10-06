@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { makeT, localDigits } from './lib/i18n.js'
 import { parseRequirements, toIsoDate } from './lib/requirements.js'
 import { evaluate, STATUS } from './lib/status.js'
-import { inspectPdf, looksLikePdf, buildPackage, packageFileName, MAX_FILES, MAX_TOTAL_BYTES } from './lib/pdf.js'
+import { inspectPdf, looksLikePdf, buildPackage, packageFileName, planPackage, MAX_FILES, MAX_TOTAL_BYTES } from './lib/pdf.js'
 import { suggestMatches } from './lib/suggest.js'
 import { checklistCsv } from './lib/csv.js'
 import './App.css'
@@ -84,6 +84,7 @@ export default function App() {
   const [result, setResult] = useState(null)
   const [genError, setGenError] = useState('')
   const [toast, setToast] = useState(null)
+  const [withIndex, setWithIndex] = useState(false)
 
   useEffect(() => {
     document.documentElement.lang = lang
@@ -131,8 +132,8 @@ export default function App() {
   )
 
   const signature = useMemo(
-    () => JSON.stringify([data?.tender.tender_id, matches, expiryByFile, files.map((f) => f.id)]),
-    [data, matches, expiryByFile, files],
+    () => JSON.stringify([data?.tender.tender_id, matches, expiryByFile, files.map((f) => f.id), withIndex, withIndex ? lang : '']),
+    [data, matches, expiryByFile, files, withIndex, lang],
   )
   const resultFresh = result && result.signature === signature
 
@@ -246,7 +247,7 @@ export default function App() {
       const docs = evaluation.rows
         .filter((r) => r.fileId)
         .map((r) => ({ title: r.req.title_en, fileName: fileById[r.fileId].name, bytes: fileById[r.fileId].bytes }))
-      const out = await buildPackage(data.tender, docs)
+      const out = await buildPackage(data.tender, docs, { index: withIndex ? await indexOptions() : null })
       const url = URL.createObjectURL(new Blob([out.bytes], { type: 'application/pdf' }))
       setResult({ url, name: packageFileName(data.tender.tender_id), total: out.total, docs: docs.length, signature })
     } catch (err) {
@@ -254,6 +255,29 @@ export default function App() {
     } finally {
       setGenerating(false)
     }
+  }
+
+  // Index labels: Helvetica text in English; Bangla is shaped by the browser with the bundled font.
+  async function indexOptions() {
+    const reqs = evaluation.rows.filter((r) => r.fileId).map((r) => r.req)
+    if (lang !== 'bn') {
+      return { heading: 'Index', columns: { document: 'Document', start: 'Starts at' }, labels: reqs.map((r) => r.title_en) }
+    }
+    const { renderLabel } = await import('./lib/bnText.js')
+    return {
+      heading: await renderLabel('সূচিপত্র', 20),
+      columns: { document: await renderLabel('কাগজ', 10), start: await renderLabel('শুরুর পৃষ্ঠা', 10, 68) },
+      labels: await Promise.all(reqs.map((r) => renderLabel(r.title_bn, 11, 360))),
+    }
+  }
+
+  function focusRequirement(reqId) {
+    const row = document.getElementById(`req-${reqId}`)
+    if (!row) return
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    row.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'center' })
+    const target = row.querySelector('input[type="date"]') || row.querySelector('select')
+    target?.focus({ preventScroll: true })
   }
 
   function exportCsv() {
@@ -285,6 +309,10 @@ export default function App() {
   const totalSize = files.reduce((s, f) => s + f.size, 0)
   const matchedRows = evaluation ? evaluation.rows.filter((r) => r.fileId) : []
   const matchedPages = matchedRows.reduce((s, r) => s + (fileById[r.fileId]?.pages || 0), 0)
+  const plan = planPackage(matchedRows.map((r) => fileById[r.fileId]?.pages || 0), withIndex)
+  const mandatoryRows = evaluation ? evaluation.rows.filter((r) => r.req.mandatory) : []
+  const optionalRows = evaluation ? evaluation.rows.filter((r) => !r.req.mandatory) : []
+  const pageLabel = (a, b) => (a === b ? t('mfPage', { a }) : t('mfRange', { a, b }))
   const suggestionEntries = Object.entries(suggestions)
   const steps = [
     { n: 1, label: t('step1'), done: !!data, href: '#step-tender' },
@@ -313,7 +341,10 @@ export default function App() {
             </span>
             <div>
               <div className="brand-name">{t('appName')}</div>
-              <div className="brand-sub">{t('privacy')}</div>
+              <div className="trust-badge">
+                <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path fill="currentColor" d="M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-6v2h3v2H7v-2h3v-2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm0 2v10h16V6H4Z"/></svg>
+                {t('privacy')}
+              </div>
             </div>
           </div>
           <div className="lang-switch" role="group" aria-label={t('langLabel')}>
@@ -460,6 +491,13 @@ export default function App() {
                         {isDup && (
                           <div className="dup-note">
                             {t('duplicateOf', { names: group.filter((g) => g.id !== f.id).map((g) => g.name).join(', ') })}
+                            <span className={`dup-state${matchedReq ? ' is-used' : ''}`}>
+                              {matchedReq
+                                ? t('dupInUse', { doc: docName(reqById[matchedReq]) })
+                                : group.some((g) => reqOfFile[g.id])
+                                  ? t('dupUnused')
+                                  : t('dupChooseOne')}
+                            </span>
                           </div>
                         )}
                       </div>
@@ -623,6 +661,43 @@ export default function App() {
                   <div className="muted small">{t('okOf', { ok: evaluation.okCount, total: evaluation.rows.length })}</div>
                 </div>
 
+                <section className="preflight" aria-labelledby="h-preflight">
+                  <h3 id="h-preflight">{t('pfTitle')}</h3>
+                  <dl className="pf-grid">
+                    <div className={mandatoryRows.every((r) => !r.blocking) ? 'is-good' : 'is-bad'}>
+                      <dt>{t('pfMandatory')}</dt>
+                      <dd>{num(mandatoryRows.filter((r) => !r.blocking).length)} / {num(mandatoryRows.length)}</dd>
+                    </div>
+                    <div>
+                      <dt>{t('pfOptional')}</dt>
+                      <dd>{num(optionalRows.filter((r) => r.fileId).length)} / {num(optionalRows.length)}</dd>
+                    </div>
+                    <div className={evaluation.blocking.length ? 'is-bad' : 'is-good'}>
+                      <dt>{t('pfBlocking')}</dt>
+                      <dd>{num(evaluation.blocking.length)}</dd>
+                    </div>
+                    <div>
+                      <dt>{t('pfUploaded')}</dt>
+                      <dd>{num(files.length)}</dd>
+                    </div>
+                    <div>
+                      <dt>{t('pfIncluded')}</dt>
+                      <dd>{num(matchedRows.length)}</dd>
+                    </div>
+                    <div>
+                      <dt>{t('pfSource')}</dt>
+                      <dd>{num(plan.sourcePages)}</dd>
+                    </div>
+                    <div className="pf-wide">
+                      <dt>{t('pfTotal')}</dt>
+                      <dd>{num(plan.total)}</dd>
+                    </div>
+                  </dl>
+                  <p className={`pf-verdict ${evaluation.ready ? 'is-good' : 'is-bad'}`}>
+                    {evaluation.ready ? t('ready') : t('actionRequired')}
+                  </p>
+                </section>
+
                 <ul className="status-counts">
                   {Object.values(STATUS).map((s) => {
                     const n = evaluation.rows.filter((r) => r.status === s).length
@@ -638,17 +713,63 @@ export default function App() {
                     <ul>
                       {evaluation.blocking.map((row) => (
                         <li key={row.req.id}>
-                          <a href={`#req-${row.req.id}`}>{blockingReason(row)}</a>
+                          <a
+                            href={`#req-${row.req.id}`}
+                            onClick={(e) => {
+                              e.preventDefault()
+                              focusRequirement(row.req.id)
+                            }}
+                          >
+                            <span className="issue-doc">{docName(row.req)}</span> — <span className="issue-status">{t(`st_${row.status}`)}</span>
+                            <span className="issue-why">{blockingReason(row).replace(`${docName(row.req)}: `, '')}</span>
+                          </a>
                         </li>
                       ))}
                     </ul>
                   </div>
                 )}
 
+                <section className="manifest" aria-labelledby="h-manifest">
+                  <h3 id="h-manifest">{t('mfTitle')}</h3>
+                  <ol className="mf-list">
+                    <li className="mf-fixed">
+                      <span className="mf-title">{t('mfCover')}</span>
+                      <span className="mf-pages">{pageLabel(num(1), num(1))}</span>
+                    </li>
+                    {withIndex && (
+                      <li className="mf-fixed">
+                        <span className="mf-title">{t('mfIndex')}</span>
+                        <span className="mf-pages">{pageLabel(num(2), num(2))}</span>
+                      </li>
+                    )}
+                    {matchedRows.map((r, i) => (
+                      <li key={r.req.id}>
+                        <span className="mf-title">{docName(r.req)}</span>
+                        <span className="mf-pages">{pageLabel(num(plan.ranges[i].start), num(plan.ranges[i].end))}</span>
+                        <span className="mf-file">
+                          {fileById[r.fileId].name} · {fileById[r.fileId].pages === 1 ? t('page1') : t('pages', { n: fileById[r.fileId].pages })}
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                  {matchedRows.length === 0 && <p className="muted small">{t('mfEmpty')}</p>}
+                  <p className="mf-total">{t('mfTotal', { n: plan.total })}</p>
+                </section>
+
+                <label className="check-row">
+                  <input type="checkbox" checked={withIndex} onChange={(e) => setWithIndex(e.target.checked)} />
+                  <span>
+                    <strong>{t('indexToggle')}</strong>
+                    <span className="muted small">{t('indexHint')}</span>
+                  </span>
+                </label>
+
                 <p className="muted small">{t('generateHelp', { id: data.tender.tender_id })}</p>
                 {evaluation.ready && (
                   <p className="small include-line">
-                    {t('willInclude', { docs: matchedRows.length, pages: matchedPages, total: matchedPages + 1 })}
+                    {withIndex
+                      ? t('willIncludeIdx', { docs: matchedRows.length, pages: matchedPages, total: plan.total })
+                      : t('willInclude', { docs: matchedRows.length, pages: matchedPages, total: plan.total })}
                   </p>
                 )}
 
@@ -668,8 +789,17 @@ export default function App() {
                         <div className="muted small">{t('generatedInfo', { pages: result.total, docs: result.docs })}</div>
                       </div>
                     </div>
+                    <dl className="result-facts">
+                      <div><dt>{t('colFile')}</dt><dd className="filename">{result.name}</dd></div>
+                      <div><dt>{t('pfIncluded')}</dt><dd>{num(result.docs)}</dd></div>
+                      <div><dt>{t('pfTotal')}</dt><dd>{num(result.total)}</dd></div>
+                      <div><dt>{t('colStatus')}</dt><dd className="ok-text">✓ {t('validated')}</dd></div>
+                    </dl>
                     <a className="btn btn-success btn-block" href={result.url} download={result.name}>
                       {t('download', { name: result.name })}
+                    </a>
+                    <a className="btn btn-secondary btn-block" href={result.url} target="_blank" rel="noopener">
+                      {t('preview')}
                     </a>
                   </div>
                 )}

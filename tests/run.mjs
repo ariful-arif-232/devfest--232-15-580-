@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { parseRequirements } from '../src/lib/requirements.js'
 import { evaluate, requirementStatus, STATUS } from '../src/lib/status.js'
-import { inspectPdf, buildPackage, packageFileName } from '../src/lib/pdf.js'
+import { inspectPdf, buildPackage, packageFileName, planPackage } from '../src/lib/pdf.js'
 import { suggestMatches } from '../src/lib/suggest.js'
 
 const fx = (n) => new URL(`./fixtures/${n}`, import.meta.url)
@@ -115,6 +115,26 @@ await test('rotated pages and odd tender ids still get footers', async () => {
   const text = execFileSync('pdftotext', [tmp, '-']).toString()
   for (let i = 1; i <= 3; i++) assert.ok(text.includes(`LGED/2027/Q-88 | Page ${i} of 3`))
   assert.equal(packageFileName('LGED/2027/Q-88'), 'LGED_2027_Q-88_Package.pdf')
+})
+
+await test('page plan and index page numbering', async () => {
+  assert.deepEqual(planPackage([1, 1, 4], false), { indexPage: null, ranges: [{ start: 2, end: 2 }, { start: 3, end: 3 }, { start: 4, end: 7 }], sourcePages: 6, total: 7 })
+  assert.deepEqual(planPackage([2, 3], true).ranges, [{ start: 3, end: 4 }, { start: 5, end: 7 }])
+  assert.equal(planPackage([], true).total, 2)
+  const byName = Object.fromEntries(files.map((f) => [f.name, f]))
+  const docs = requirements.filter((r) => matches[r.id]).map((r) => ({ title: r.title_en, fileName: matches[r.id], bytes: byName[matches[r.id]].bytes }))
+  const index = { heading: 'Index', columns: { document: 'Document', start: 'Starts at' }, labels: docs.map((d) => d.title) }
+  const out = await buildPackage(tender, docs, { index })
+  assert.equal(out.total, 17)
+  const path = join(tmpdir(), 'tpb-index-test.pdf')
+  writeFileSync(path, out.bytes)
+  const pages = execFileSync('pdftotext', ['-layout', path, '-']).toString().split('\f')
+  pages.slice(0, 17).forEach((p, i) => assert.ok(p.includes(`T-2026-0417 | Page ${i + 1} of 17`), `footer ${i + 1}`))
+  const idx = pages[1]
+  assert.ok(idx.includes('Index') && idx.includes('Starts at'))
+  const expectStarts = [['Trade License', 3], ['TIN Certificate', 4], ['VAT Registration Certificate', 5], ['Bank Solvency Certificate', 6], ['Experience Certificate', 7], ['Technical Proposal', 9], ['Financial Proposal', 13], ['Signed Declaration', 16]]
+  for (const [title, start] of expectStarts) assert.match(idx, new RegExp(`${title}\\s+${start}\\s*$`, 'm'), title)
+  assert.ok(pages[2].includes('Trade License 2026') && pages[8].includes('Technical Proposal'))
 })
 
 console.log(`\n${passed} tests passed`)
