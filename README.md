@@ -8,7 +8,7 @@ All processing happens in the browser. There is no backend, no database, and no 
 |---|---|
 | **Participant** | Md. Ariful Islam |
 | **Registration number** | 232-15-580 |
-| **Live URL** | https://devfest-232-15-580.vercel.app |
+| **Live URL** | https://tender-package-builder.vercel.app |
 | **Repository** | https://github.com/ariful-arif-232/devfest--232-15-580- |
 
 ![Document statuses](screenshots/statuses-blocking.png)

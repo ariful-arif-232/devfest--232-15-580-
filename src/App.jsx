@@ -400,6 +400,7 @@ export default function App() {
               accept=".pdf,application/pdf"
               multiple
               onFiles={addFiles}
+              disabled={busy > 0}
               title={t('choosePdfs')}
               hint={t('dropPdfs')}
               icon={<svg viewBox="0 0 24 24" width="28" height="28"><path fill="currentColor" d="M12 3 7 8h3v6h4V8h3l-5-5ZM5 16v4h14v-4h2v6H3v-6h2Z"/></svg>}
