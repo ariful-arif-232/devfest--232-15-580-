@@ -241,3 +241,6 @@ input[aria-invalid='true'] { border-color: var(--bad); background: #fffafa; }
 .result-facts dt { color: var(--muted); }
 .result-facts dd { margin: 0; font-weight: 600; text-align: right; overflow-wrap: anywhere; min-width: 0; }
 .ok-text { color: var(--ok); }
+.saved-bar { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; justify-content: space-between; padding: 10px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); }
+.saved-text { display: grid; gap: 2px; min-width: 0; font-size: 0.9rem; }
+.saved-actions { display: flex; flex-wrap: wrap; gap: 6px; }

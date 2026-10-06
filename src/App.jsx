@@ -5,6 +5,7 @@ import { evaluate, STATUS } from './lib/status.js'
 import { inspectPdf, looksLikePdf, buildPackage, packageFileName, planPackage, MAX_FILES, MAX_TOTAL_BYTES } from './lib/pdf.js'
 import { suggestMatches } from './lib/suggest.js'
 import { checklistCsv } from './lib/csv.js'
+import { saveProject, loadProject, clearProject, peekProject } from './lib/store.js'
 import './App.css'
 
 let nextId = 1
@@ -85,6 +86,11 @@ export default function App() {
   const [genError, setGenError] = useState('')
   const [toast, setToast] = useState(null)
   const [withIndex, setWithIndex] = useState(false)
+  const [saved, setSaved] = useState(null)
+
+  useEffect(() => {
+    peekProject().then(setSaved)
+  }, [])
 
   useEffect(() => {
     document.documentElement.lang = lang
@@ -159,8 +165,9 @@ export default function App() {
       return
     }
     try {
-      const parsed = parseRequirements(await file.text())
-      setData({ ...parsed, sourceName: file.name })
+      const text = await file.text()
+      const parsed = parseRequirements(text)
+      setData({ ...parsed, sourceName: file.name, sourceText: text })
       setTenderError(null)
       setMatches({})
     } catch (err) {
@@ -292,6 +299,50 @@ export default function App() {
     setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 
+  async function saveWork() {
+    try {
+      await saveProject({ version: 1, sourceText: data.sourceText, sourceName: data.sourceName, lang, withIndex, matches, expiryByFile }, files)
+      setSaved(await peekProject())
+      setToast(t('savedToast'))
+    } catch (err) {
+      setToast(t('saveFailed', { msg: err?.message || String(err) }))
+    }
+  }
+
+  async function reopenWork() {
+    try {
+      const restored = await loadProject()
+      if (!restored) return
+      const { project, files: restoredFiles, missing } = restored
+      const parsed = parseRequirements(project.sourceText)
+      const fileIds = new Set(restoredFiles.map((f) => f.id))
+      const reqIds = new Set(parsed.requirements.map((r) => r.id))
+      for (const f of restoredFiles) nextId = Math.max(nextId, Number(f.id.slice(1)) + 1)
+      setData({ ...parsed, sourceName: project.sourceName, sourceText: project.sourceText })
+      setFiles(restoredFiles)
+      setMatches(Object.fromEntries(Object.entries(project.matches || {}).filter(([r, f]) => reqIds.has(r) && fileIds.has(f))))
+      setExpiryByFile(Object.fromEntries(Object.entries(project.expiryByFile || {}).filter(([f]) => fileIds.has(f))))
+      setWithIndex(!!project.withIndex)
+      if (project.lang === 'bn' || project.lang === 'en') setLang(project.lang)
+      setRejected(missing.map((name) => ({ id: newId(), name, key: 'errRestore' })))
+      setResult(null)
+      setTenderError(null)
+      setGenError('')
+      setToast(t('reopenedToast'))
+    } catch (err) {
+      setToast(t('reopenFailed', { msg: err?.message || String(err) }))
+    }
+  }
+
+  async function clearSaved() {
+    try {
+      await clearProject()
+    } finally {
+      setSaved(null)
+      setToast(t('clearedToast'))
+    }
+  }
+
   function resetAll() {
     if (!window.confirm(t('resetConfirm'))) return
     setData(null)
@@ -416,6 +467,23 @@ export default function App() {
             {tenderError && (
               <div className="alert alert-error" role="alert">
                 <strong>requirements.json</strong> — {t(tenderError.key, tenderError.params)}
+              </div>
+            )}
+            {(data || saved) && (
+              <div className="saved-bar">
+                <div className="saved-text">
+                  <strong>{t('savedTitle')}</strong>
+                  <span className="muted small">
+                    {saved
+                      ? t('savedInfo', { id: saved.sourceText ? (() => { try { return JSON.parse(saved.sourceText).tender.tender_id } catch { return '—' } })() : '—', n: (saved.files || []).length, date: new Date(saved.savedAt).toLocaleString(lang === 'bn' ? 'bn-BD' : 'en-GB') })
+                      : t('savedNone')}
+                  </span>
+                </div>
+                <div className="saved-actions">
+                  {data && <button type="button" className="btn btn-secondary btn-sm" onClick={saveWork}>{t('saveWork')}</button>}
+                  {saved && <button type="button" className="btn btn-ghost btn-sm" onClick={reopenWork}>{t('reopenWork')}</button>}
+                  {saved && <button type="button" className="btn btn-ghost btn-sm" onClick={clearSaved}>{t('clearSaved')}</button>}
+                </div>
               </div>
             )}
           </section>
