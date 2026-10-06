@@ -187,4 +187,57 @@ await test('cover lists every included document even for 30 documents', async ()
   for (let i = 1; i <= 30; i++) assert.ok(cover.includes(`Requirement number ${i} supporting`), `cover entry ${i}`)
 })
 
+// Renders one page to an 8-bit grayscale bitmap (72 dpi, so 1 px = 1 pt).
+function renderGray(pdfPath, page) {
+  const prefix = join(tmpdir(), `tpb-r-${process.pid}-${page}`)
+  execFileSync('pdftoppm', ['-r', '72', '-gray', '-cropbox', '-f', String(page), '-l', String(page), '-singlefile', pdfPath, prefix])
+  const buf = readFileSync(`${prefix}.pgm`)
+  const parts = buf.toString('latin1', 0, 40).split(/\s+/)
+  const W = Number(parts[1]); const H = Number(parts[2])
+  const header = `P5\n${W} ${H}\n255\n`.length
+  return { W, H, px: (x, y) => buf[header + y * W + x] }
+}
+
+await test('footer band never covers full-bleed content (sizes, rotations, crop box, seal)', async () => {
+  const src = await inspectPdf(fileOf('fullbleed.pdf'))
+  const srcPath = fx('fullbleed.pdf').pathname
+  const png = redPng(60, 60)
+  for (const withSeal of [false, true]) {
+    const seal = withSeal ? { png, pages: [2, 3, 4, 5, 6, 7], position: 'bottom-right', size: 'm' } : null
+    const out = await buildPackage(tender, [{ title: 'Full bleed', fileName: 'fullbleed.pdf', bytes: src.bytes }], { seal })
+    assert.equal(out.total, 1 + src.pages)
+    const path = join(tmpdir(), `tpb-fullbleed-${withSeal}.pdf`)
+    writeFileSync(path, out.bytes)
+    const text = execFileSync('pdftotext', ['-layout', path, '-']).toString().split('\f')
+    for (let i = 1; i <= src.pages; i++) {
+      const a = renderGray(srcPath, i)
+      const b = renderGray(path, i + 1)
+      const band = withSeal ? 24 + 60 + 12 : 24
+      assert.equal(b.W, a.W, `page ${i} width kept`)
+      assert.ok(Math.abs(b.H - (a.H + band)) <= 1, `page ${i} gains a ${band}pt band (${a.H} -> ${b.H})`)
+      // 1. every original pixel is unchanged (last row may blend at the band edge)
+      let diff = 0
+      for (let y = 0; y < a.H - 1; y++) for (let x = 0; x < a.W; x++) if (a.px(x, y) !== b.px(x, y)) diff++
+      assert.equal(diff, 0, `page ${i}: original content altered in ${diff} px`)
+      // 2. footer text lives only in the new band, readable and correct
+      assert.ok(text[i].includes(`T-2026-0417 | Page ${i + 1} of ${out.total}`), `footer text page ${i + 1}`)
+      assert.ok(text[i].includes(`BOTTOM EDGE CONTENT ${i}`), `bottom-edge source text still extractable on page ${i + 1}`)
+      let footerInk = 0; let strayInk = 0
+      for (let y = b.H - 24; y < b.H; y++) for (let x = 0; x < b.W; x++) {
+        if (b.px(x, y) >= 160) continue
+        if (Math.abs(x - b.W / 2) < 70) footerInk++
+        else strayInk++
+      }
+      assert.ok(footerInk > 40, `footer ink visible on page ${i + 1}`)
+      assert.equal(strayInk, 0, `page ${i + 1}: nothing but the footer in the footer band (incl. hidden crop content)`)
+      // 3. seal sits between the source content and the footer band
+      if (withSeal) {
+        let sealInk = 0
+        for (let y = a.H; y < b.H - 24; y++) for (let x = 0; x < b.W; x++) if (b.px(x, y) < 160) sealInk++
+        assert.ok(sealInk > 1000, `seal drawn in its own strip on page ${i + 1}`)
+      }
+    }
+  }
+})
+
 console.log(`\n${passed} tests passed`)

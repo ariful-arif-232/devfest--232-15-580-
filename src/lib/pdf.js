@@ -136,9 +136,9 @@ function drawCover(page, fonts, tender, entries, generatedOn) {
   page.drawText('Included Documents', { x: M, y, size: 13, font: bold, color: INK })
   y -= 20
 
-  // Shrink the list until it fits above the seal band and footer. If it still does not fit,
+  // Shrink the list until it fits within the page margins. If it still does not fit,
   // drop the file-name lines so every included document is always listed.
-  const bottom = SEAL_BAND_TOP + 4
+  const bottom = 56
   const colNo = 26
   const colPages = 86
   let size = 10
@@ -182,43 +182,79 @@ function drawCover(page, fonts, tender, entries, generatedOn) {
   })
 }
 
-// Draws "<tender_id> | Page X of Y" centred on the visual bottom edge, honouring /Rotate.
-function drawFooter(page, font, text) {
-  const size = 8
-  const tw = font.widthOfTextAtSize(text, size)
+// ---------- footer band ----------
+// Every output page gets a dedicated band added below its visible area; the footer (and an
+// optional seal) are drawn only inside that band, so original page content is never covered.
+const FOOTER_BAND = 24
+const SEAL_PAD = 6
+
+function pageFrame(page) {
   const box = page.getCropBox()
   const rot = (((page.getRotation().angle || 0) % 360) + 360) % 360
-  const inset = 12
-  let x, y
-  if (rot === 90) {
-    x = box.x + box.width - inset
-    y = box.y + (box.height - tw) / 2
-  } else if (rot === 180) {
-    x = box.x + (box.width + tw) / 2
-    y = box.y + box.height - inset
-  } else if (rot === 270) {
-    x = box.x + inset
-    y = box.y + (box.height + tw) / 2
+  const sideways = rot === 90 || rot === 270
+  return { box, rot, VW: sideways ? box.height : box.width, VH: sideways ? box.width : box.height }
+}
+
+// Grows the visible page by `extra` points on its visual bottom edge (honouring /Rotate).
+// Content keeps its coordinates and scale, so nothing is moved, cropped or resized.
+function extendVisualBottom(page, extra) {
+  const { box, rot } = pageFrame(page)
+  let { x, y, width, height } = box
+  if (rot === 90) width += extra
+  else if (rot === 180) height += extra
+  else if (rot === 270) {
+    x -= extra
+    width += extra
   } else {
-    x = box.x + (box.width - tw) / 2
-    y = box.y + inset
+    y -= extra
+    height += extra
   }
-  const rad = (rot * Math.PI) / 180
-  const cos = Math.cos(rad)
-  const sin = Math.sin(rad)
-  const local = (lx, ly) => ({ x: x + lx * cos - ly * sin, y: y + lx * sin + ly * cos })
-  const pad = 5
-  const origin = local(-pad, -3)
-  page.drawRectangle({
-    x: origin.x,
-    y: origin.y,
-    width: tw + pad * 2,
-    height: size + 5,
-    rotate: degrees(rot),
-    color: rgb(1, 1, 1),
-    opacity: 0.85,
-  })
-  page.drawText(text, { x, y, size, font, color: INK, rotate: degrees(rot) })
+  page.setCropBox(x, y, width, height)
+  const m = page.getMediaBox()
+  const x0 = Math.min(m.x, x)
+  const y0 = Math.min(m.y, y)
+  page.setMediaBox(x0, y0, Math.max(m.x + m.width, x + width) - x0, Math.max(m.y + m.height, y + height) - y0)
+}
+
+// Maps visual coordinates (origin at the visual bottom-left) to page coordinates.
+function visualToPage(page) {
+  const { box, rot, VW } = pageFrame(page)
+  const map = (vx, vy) => {
+    if (rot === 90) return { x: box.x + box.width - vy, y: box.y + vx }
+    if (rot === 180) return { x: box.x + box.width - vx, y: box.y + box.height - vy }
+    if (rot === 270) return { x: box.x + vy, y: box.y + box.height - vx }
+    return { x: box.x + vx, y: box.y + vy }
+  }
+  return { map, rotate: degrees(rot), VW }
+}
+
+// Fits a seal image into a sizePt box (wider images may use up to 1.6x width), preserving aspect ratio.
+function sealDims(page, image, sizePt) {
+  const { VW } = pageFrame(page)
+  const k = Math.min(Math.min(sizePt * 1.6, VW * 0.3) / image.width, sizePt / image.height)
+  return { w: image.width * k, h: image.height * k }
+}
+
+// Adds the band, then draws the optional seal and "<tender_id> | Page X of Y" inside it.
+function finishPage(page, font, text, seal) {
+  const dims = seal ? sealDims(page, seal.image, seal.size) : null
+  const extra = FOOTER_BAND + (dims ? dims.h + SEAL_PAD * 2 : 0)
+  extendVisualBottom(page, extra)
+  const { map, rotate, VW } = visualToPage(page)
+  // The band lies wholly outside the original visible area; paint it white so any content that was
+  // previously hidden outside the crop box cannot show through.
+  const origin = map(0, 0)
+  page.drawRectangle({ x: origin.x, y: origin.y, width: VW, height: extra, rotate, color: rgb(1, 1, 1) })
+  if (dims) {
+    const margin = 24
+    const vx = seal.position === 'bottom-left' ? margin : VW - margin - dims.w
+    const at = map(vx, FOOTER_BAND + SEAL_PAD)
+    page.drawImage(seal.image, { x: at.x, y: at.y, width: dims.w, height: dims.h, rotate })
+  }
+  const size = 8
+  const tw = font.widthOfTextAtSize(text, size)
+  const at = map((VW - tw) / 2, (FOOTER_BAND - size) / 2 + 1.5)
+  page.drawText(text, { x: at.x, y: at.y, size, font, color: INK, rotate })
 }
 
 // Page plan shared by the UI manifest and the generator: cover, optional index, then documents.
@@ -296,43 +332,6 @@ export function parsePageList(text, max) {
 }
 
 export const SEAL_SIZES = { s: 48, m: 60, l: 72 }
-// Seals live in the bottom margin band, between the footer and normal page content.
-const SEAL_BOTTOM = 30
-const SEAL_BAND_TOP = SEAL_BOTTOM + SEAL_SIZES.l
-
-// Places the seal in a bottom corner of the visual page (honouring /Rotate), above the footer strip
-// and inside the bottom margin band so it does not cover the letterhead or body text.
-function drawSeal(page, image, position, sizePt) {
-  const box = page.getCropBox()
-  const rot = (((page.getRotation().angle || 0) % 360) + 360) % 360
-  const sideways = rot === 90 || rot === 270
-  const VW = sideways ? box.height : box.width
-  const VH = sideways ? box.width : box.height
-  // Fit inside a sizePt x sizePt box (and a sane share of small pages), preserving aspect ratio.
-  const maxW = Math.min(sizePt * 1.6, VW * 0.3)
-  const maxH = Math.min(sizePt, VH * 0.1)
-  const k = Math.min(maxW / image.width, maxH / image.height)
-  const w = image.width * k
-  const h = image.height * k
-  const margin = 24
-  const vx = position === 'bottom-left' ? margin : VW - margin - w
-  const vy = SEAL_BOTTOM
-  let x, y
-  if (rot === 90) {
-    x = box.x + box.width - vy
-    y = box.y + vx
-  } else if (rot === 180) {
-    x = box.x + box.width - vx
-    y = box.y + box.height - vy
-  } else if (rot === 270) {
-    x = box.x + vy
-    y = box.y + box.height - vx
-  } else {
-    x = box.x + vx
-    y = box.y + vy
-  }
-  page.drawImage(image, { x, y, width: w, height: h, rotate: degrees(rot) })
-}
 
 // documents: [{ title, fileName, bytes }] already in final order.
 // options.seal: null, or { png, pages: [final page numbers], position, size }.
@@ -364,12 +363,11 @@ export async function buildPackage(tender, documents, options = {}) {
   const pages = out.getPages()
   const total = pages.length
   const id = safeText(regular, tender.tender_id)
-  if (options.seal && options.seal.pages.length) {
-    const image = await out.embedPng(options.seal.png)
-    const size = SEAL_SIZES[options.seal.size] || SEAL_SIZES.m
-    for (const n of options.seal.pages) if (pages[n - 1]) drawSeal(pages[n - 1], image, options.seal.position, size)
-  }
-  pages.forEach((page, i) => drawFooter(page, regular, `${id} | Page ${i + 1} of ${total}`))
+  const sealPages = new Set(options.seal ? options.seal.pages : [])
+  const seal = sealPages.size
+    ? { image: await out.embedPng(options.seal.png), size: SEAL_SIZES[options.seal.size] || SEAL_SIZES.m, position: options.seal.position }
+    : null
+  pages.forEach((page, i) => finishPage(page, regular, `${id} | Page ${i + 1} of ${total}`, seal && sealPages.has(i + 1) ? seal : null))
 
   const bytes = await out.save()
   return { bytes, total, entries, generatedOn }

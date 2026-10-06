@@ -29,6 +29,37 @@ await makePdf('experience_cert.pdf', 'Experience Certificate', 2)
 copyFileSync(new URL('experience_cert.pdf', dir), new URL('experience_cert (1).pdf', dir))
 await makePdf('scan_0042.pdf', 'Declaration (signed)', 2)
 await makePdf('rotated_landscape.pdf', 'Rotated page test', 2, { landscape: true, rotate: 90 })
+// Full-bleed hidden case: ink everywhere, including the very bottom edge, in several sizes and rotations.
+{
+  const doc = await PDFDocument.create()
+  const font = await doc.embedFont(StandardFonts.Helvetica)
+  const specs = [
+    { size: [595.28, 841.89], rotate: 0 }, // A4 portrait
+    { size: [792, 612], rotate: 0 }, // Letter landscape
+    { size: [300, 500], rotate: 90 }, // custom size, rotated
+    { size: [595.28, 841.89], rotate: 180 },
+    { size: [612, 792], rotate: 270 }, // Letter, rotated
+    { size: [595.28, 841.89], rotate: 0, crop: true }, // content hidden outside the crop box
+  ]
+  for (const [i, spec] of specs.entries()) {
+    const [w, h] = spec.size
+    const page = doc.addPage([w, h])
+    if (spec.rotate) page.setRotation({ type: 'degrees', angle: spec.rotate })
+    page.drawRectangle({ x: 0, y: 0, width: w, height: h, color: rgb(0.8, 0.85, 0.9) })
+    for (let y = 0; y < h; y += 40) page.drawRectangle({ x: 0, y, width: w, height: 6, color: rgb(0.2, 0.3, 0.4) })
+    page.drawRectangle({ x: 0, y: 0, width: w, height: 3, color: rgb(0, 0, 0) })
+    page.drawRectangle({ x: 0, y: 0, width: 3, height: h, color: rgb(0, 0, 0) })
+    page.drawRectangle({ x: w - 3, y: 0, width: 3, height: h, color: rgb(0, 0, 0) })
+    page.drawRectangle({ x: 0, y: h - 3, width: w, height: 3, color: rgb(0, 0, 0) })
+    for (const y of [1, 9, 18]) page.drawText(`BOTTOM EDGE CONTENT ${i + 1} - must stay visible`, { x: 8, y, size: 8, font })
+    page.drawText(`Full-bleed page ${i + 1}`, { x: 20, y: h - 60, size: 20, font })
+    if (spec.crop) {
+      page.drawRectangle({ x: 0, y: 0, width: w, height: 60, color: rgb(0.1, 0.1, 0.1) }) // hidden below the crop
+      page.setCropBox(0, 60, w, h - 60)
+    }
+  }
+  writeFileSync(new URL('fullbleed.pdf', dir), await doc.save())
+}
 writeFileSync(new URL('company_logo.png', dir), Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex'))
 writeFileSync(new URL('broken.pdf', dir), '%PDF-1.7\n this is not really a pdf')
 writeFileSync(new URL('malformed.json', dir), '{ "tender": { "tender_id": "X" ')
