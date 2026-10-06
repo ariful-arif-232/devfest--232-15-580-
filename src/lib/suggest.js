@@ -17,16 +17,21 @@ function tokenMatch(a, b) {
   return min >= 3 && (a.startsWith(b) || b.startsWith(a))
 }
 
-function score(fileName, req) {
-  const ft = tokens(fileName)
-  if (!ft.length) return 0
-  const rt = tokens(req.title_en).concat(tokens(req.id))
-  const titleTokens = tokens(req.title_en)
+function scoreTitle(ft, title, id) {
+  const titleTokens = tokens(title)
   if (!titleTokens.length) return 0
+  const rt = titleTokens.concat(tokens(id))
   const hits = titleTokens.filter((t) => ft.some((f) => tokenMatch(f, t))).length
   const fileHits = ft.filter((f) => rt.some((t) => tokenMatch(f, t))).length
   // Balance coverage of the title with how much of the filename is explained.
   return (hits / titleTokens.length) * 0.6 + (fileHits / ft.length) * 0.4
+}
+
+// Scores a filename against both the English and Bangla titles and keeps the better one.
+function score(fileName, req) {
+  const ft = tokens(fileName)
+  if (!ft.length) return 0
+  return Math.max(scoreTitle(ft, req.title_en, req.id), scoreTitle(ft, req.title_bn, req.id))
 }
 
 // Returns { [reqId]: fileId } for unmatched requirements with one clear best unmatched file.

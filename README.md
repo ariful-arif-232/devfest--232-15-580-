@@ -21,7 +21,7 @@ Requires Node.js 20+.
 npm install
 npm run dev        # http://localhost:5173
 npm run build      # production build in dist/
-npm test           # logic + PDF unit tests on generated test fixtures (needs pdftotext from poppler-utils)
+npm test           # logic + PDF unit tests on generated test fixtures, writing only to the OS temp dir (needs poppler-utils)
 ```
 
 Optional browser test: run `npm run dev`, then `node tests/e2e.cjs` (requires Playwright).
@@ -50,10 +50,17 @@ Optional browser test: run `npm run dev`, then `node tests/e2e.cjs` (requires Pl
 
 ## Completed bonus features
 
-- **A: Auto-match suggestions.** Suggestions come from comparing file names with requirement titles. They are shown per requirement with an "Accept" button, plus an "Accept all" option. Suggestions are never applied automatically. When files with different content tie for the same requirement, nothing is suggested.
-- **B: Bad PDF handling.** Damaged, password-protected and unreadable PDFs are rejected with a clear message instead of crashing the app.
-- **C: CSV checklist export.** The export has the columns `document, file name, pages, expiry date, status` and is UTF-8 with a BOM so Excel opens it correctly.
-- The cover page lists the page range of each document. This is not a separate index page (bonus D was not implemented).
+- **Auto-match suggestions.** File names are normalised: case, spaces, underscores, hyphens, punctuation, `.pdf`, pure numbers and common noise words like "copy" or "scan" are ignored. They are then compared with each requirement's `title_en` and `title_bn`. A requirement only gets a suggestion when one file is the clear best match above a threshold; if files with different content tie, nothing is suggested. Suggestions show as "Suggested: …" with an Accept button and an "Accept all" option, and are never applied automatically.
+- **Bad PDF handling.** Damaged, unreadable and password-protected PDFs are rejected with a message in English or Bangla. A file is only added after it has been parsed and its pages test-copied, so a failed file never partly enters the app, already-uploaded files are unaffected, and generation never uses an unreadable file.
+- **CSV checklist export.** It exports the current state with the columns `document, file name, pages, expiry date, status`, as UTF-8 with a BOM so Excel shows Bangla correctly.
+- **Index page (optional).** A toggle adds an index page after the cover, listing every included document with the page it starts on. Start pages come from each document's real page count, and adding the index shifts every later page by one. The cover, the index and every document page all carry `<tender_id> | Page X of Y`. For the official sample with the index on, the package is 17 pages: 1 cover, 1 index and 15 source pages.
+- **Bangla text in the PDF.** When the UI is in বাংলা, the index page shows the heading, column labels and every document title in Bangla (`title_bn`). The app bundles Noto Sans Bengali (SIL OFL, see `src/assets/fonts/OFL.txt`) and loads it from the app itself, never from an external server. pdf-lib's own text engine shapes some Bengali conjuncts incorrectly (for example প্র and ট্রে), so the browser shapes the Bangla text with this font and the result is embedded as a high-resolution image. That makes the Bangla display correctly, but it can't be selected or searched as text. The cover stays in English with the required fields.
+- **Save and reopen.** "Save work" stores the requirements, the uploaded PDF bytes, matches, expiry dates, language and the index setting in the browser's IndexedDB, on this device only. "Reopen saved work" restores it and re-checks every stored file's SHA-256, so duplicate detection stays valid. A file that is missing or changed is reported and its match is cleared. "Clear saved work" deletes everything stored.
+- **Seal / signature.** Upload a PNG (anything else is rejected), preview it, enter the final page numbers it should go on (for example `1, 16` or `3-5`; checked against the current final page count and listed before you generate), and pick a corner (bottom-right, bottom-left, top-right or top-left) and a size. The seal keeps its aspect ratio, stays inside the page and above the footer, follows page rotation, and goes only on the chosen pages. The original files are never changed.
+- **Tender preflight and package preview.** These read the same status engine. The preflight shows mandatory documents ready, optional documents included, blocking issues, uploaded files, included documents, source pages and the predicted final page count, plus "Ready to generate" or "Action required". Each blocking issue is listed as "Document — Status"; clicking it scrolls to and focuses that requirement. The package preview lists the cover, the index (if on) and each document in final order with its file name, page count and page range.
+- **Package ready summary.** It shows the file name, the number of included documents, the total pages and the validation result, with Download and "Preview PDF" buttons. Preview opens the PDF from a local blob URL in a new tab.
+- **Trust indicator.** A "Files stay in your browser" / "ফাইল আপনার ব্রাউজারেই থাকে" badge in the header. This is accurate because there is no backend and nothing is uploaded.
+- Not implemented: AI Help.
 
 ## Output
 
@@ -75,13 +82,16 @@ Optional browser test: run `npm run dev`, then `node tests/e2e.cjs` (requires Pl
   In the same run, `company_logo.png` was rejected as a non-PDF file. `experience_cert.pdf` and `experience_cert (1).pdf` were flagged as exact-content duplicates. `trade_license_2025.pdf` (expiry 2025-06-30) showed as Expired before it was replaced.
 
   The package has 16 pages: 1 cover page and 15 source pages. Every page carries `T-2026-0417 | Page X of 16`. Every source page was checked against the original file by rendering and comparing pixels. All pages are present, in the order above, unchanged above the footer strip. The footer sits in the blank bottom margin; on the scanned declaration, only the paper background is behind it.
-- `screenshots/` holds screenshots of the official sample pack: statuses with blocking issues (`statuses-blocking.png`), the resolved ready state (`statuses-en.png`), Bangla (`statuses-bn.png`), mobile (`mobile.png`), and after generation (`generated-en.png`).
+- The committed package is the standard mode, with the index off and no seal, which is why it has 16 pages.
+- `screenshots/` holds screenshots of the official sample pack: statuses with blocking issues (`statuses-blocking.png`), the resolved ready state (`statuses-en.png`), Bangla (`statuses-bn.png`), mobile (`mobile.png`), after generation (`generated-en.png`), a Bangla run with the index on (`generated-index-bn.png`), and a seal applied to pages 1 and 16 (`seal.png`).
 
 ## Known issues
 
 - PDFs encrypted with only an owner password are treated as password-protected and rejected, because pdf-lib cannot decrypt them.
 - The cover uses the standard Helvetica font, which only covers Latin characters. Any other characters in English tender fields are replaced with `?` on the cover; the web UI shows them correctly.
 - The date picker's display format follows the browser's locale. Values are always stored and compared as `YYYY-MM-DD`.
+- Bangla text on the index page is embedded as an image (see above), so it can't be selected or searched as text.
+- Saved work lives in this browser's IndexedDB only. Clearing site data removes it, and it doesn't sync between devices.
 
 ## AI tools used
 

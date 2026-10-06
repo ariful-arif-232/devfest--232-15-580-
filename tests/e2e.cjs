@@ -17,7 +17,7 @@ const shots = process.argv[3] === 'shots'
   const check = (cond, msg) => { if (!cond) { console.log('FAIL:', msg); process.exitCode = 1 } else console.log('ok -', msg) }
 
   await page.setInputFiles('#json-input', path.join(FX, 'malformed.json'))
-  check(await page.getByRole('alert').filter({ hasText: 'not valid JSON' }).count() === 1, 'malformed JSON error')
+  check(await page.getByRole('alert').filter({ hasText: 'not valid JSON' }).waitFor({ timeout: 5000 }).then(() => true, () => false), 'malformed JSON error')
   await page.setInputFiles('#json-input', path.join(FX, 'requirements.json'))
   check((await page.textContent('.tender-title')) === 'Supply of IT Equipment', 'tender loaded')
   check((await page.locator('.req-row:not(.req-header)').count()) === 10, '10 requirement rows')
