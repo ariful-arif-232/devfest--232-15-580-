@@ -24,7 +24,7 @@ const shots = process.argv[3] === 'shots'
   check((await page.textContent('.readiness strong')).includes('8 blocking'), '8 blocking initially')
   check(await page.locator('#step-generate button.btn-primary').isDisabled(), 'generate disabled')
 
-  const pdfs = fs.readdirSync(FX).filter((f) => f.endsWith('.pdf') && f !== 'rotated_landscape.pdf').map((f) => path.join(FX, f))
+  const pdfs = fs.readdirSync(FX).filter((f) => f.endsWith('.pdf') && !['rotated_landscape.pdf', 'fullbleed.pdf'].includes(f)).map((f) => path.join(FX, f))
   await page.setInputFiles('#pdf-input', [...pdfs, path.join(FX, 'company_logo.png')])
   await page.waitForFunction(() => document.querySelectorAll('.file-row').length === 10)
   const rejectText = await page.textContent('.reject-list')

@@ -60,7 +60,7 @@ Optional browser test: run `npm run dev`, then `node tests/e2e.cjs` (requires Pl
 - **Tender preflight and package preview.** These read the same status engine. The preflight shows mandatory documents ready, optional documents included, blocking issues, uploaded files, included documents, source pages and the predicted final page count, plus "Ready to generate" or "Action required". Each blocking issue is listed as "Document — Status"; clicking it scrolls to and focuses that requirement. The package preview lists the cover, the index (if on) and each document in final order with its file name, page count and page range.
 - **Package ready summary.** It shows the file name, the number of included documents, the total pages and the validation result, with Download and "Preview PDF" buttons. Preview opens the PDF from a local blob URL in a new tab.
 - **Trust indicator.** A "Files stay in your browser" / "ফাইল আপনার ব্রাউজারেই থাকে" badge in the header. This is accurate because there is no backend and nothing is uploaded.
-- Not implemented: AI Help.
+- **AI Help (optional, Gemini).** A secondary "AI Help (optional)" / "AI সহায়তা (ঐচ্ছিক)" panel explains the current checklist in plain English or Bangla: overall readiness, blocking issues, recommended next actions and optional observations. You enter your own Google Gemini API key. It stays only in the page's memory: it is not written to localStorage, sessionStorage or IndexedDB, not included in Save work, and is gone after a reload. It is sent only in the `x-goog-api-key` header of a direct HTTPS request from the browser to Google's Gemini API, and only when you click "Analyze tender". Only checklist metadata is sent: tender details, requirement titles, mandatory and optional flags, statuses, matched file names, page counts, expiry dates and duplicate flags. PDF files, their bytes and their text are never sent. The prompt tells Gemini that the app's statuses are authoritative. The response is shown as plain text with the note "AI suggestions do not change validation results.", and AI never changes matches, statuses, readiness or the generated PDF. A missing or invalid key, exceeded quota, network failure, timeout or unexpected response only produces a message inside this panel; the rest of the app works with or without AI. The code is isolated in `src/lib/ai.js`, and the tests mock Gemini, so no real key is used anywhere.
 
 ## Output
 
@@ -92,6 +92,8 @@ Optional browser test: run `npm run dev`, then `node tests/e2e.cjs` (requires Pl
 - The date picker's display format follows the browser's locale. Values are always stored and compared as `YYYY-MM-DD`.
 - Bangla text on the index page is embedded as an image (see above), so it can't be selected or searched as text.
 - Saved work lives in this browser's IndexedDB only. Clearing site data removes it, and it doesn't sync between devices.
+- AI Help needs internet access and the user's own Gemini API key; quality and availability depend on Google's service.
+- The only image in the official sample pack, `company_logo.png`, is the sample bidder's company logo. It is intentionally not used as app branding, and the app keeps its own neutral icon.
 
 ## AI tools used
 

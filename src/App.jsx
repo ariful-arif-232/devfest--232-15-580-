@@ -6,6 +6,7 @@ import { inspectPdf, looksLikePdf, buildPackage, packageFileName, planPackage, p
 import { suggestMatches } from './lib/suggest.js'
 import { checklistCsv } from './lib/csv.js'
 import { saveProject, loadProject, clearProject, peekProject } from './lib/store.js'
+import { analyzeTender, buildTenderSummary } from './lib/ai.js'
 import './App.css'
 
 let nextId = 1
@@ -92,6 +93,12 @@ export default function App() {
   const [sealPos, setSealPos] = useState('bottom-right')
   const [sealSize, setSealSize] = useState('m')
   const [sealError, setSealError] = useState('')
+  // AI Help: the key lives only in this component's memory and is never persisted.
+  const [aiKey, setAiKey] = useState('')
+  const [aiShowKey, setAiShowKey] = useState(false)
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiResult, setAiResult] = useState('')
+  const [aiError, setAiError] = useState('')
 
   useEffect(() => {
     peekProject().then(setSaved)
@@ -316,6 +323,21 @@ export default function App() {
     }
     setSealError('')
     setSeal({ name: file.name, bytes, url: URL.createObjectURL(new Blob([bytes], { type: 'image/png' })) })
+  }
+
+  async function runAiHelp() {
+    if (aiLoading || !evaluation) return
+    setAiLoading(true)
+    setAiError('')
+    try {
+      const summary = buildTenderSummary({ tender: data.tender, rows: evaluation.rows, files, fileById, dupGroups, ready: evaluation.ready, lang })
+      setAiResult(await analyzeTender({ apiKey: aiKey, summary, lang }))
+    } catch (err) {
+      setAiResult('')
+      setAiError(err?.key || 'errAiRequest')
+    } finally {
+      setAiLoading(false)
+    }
   }
 
   async function saveWork() {
@@ -726,6 +748,56 @@ export default function App() {
                     </div>
                   )
                 })}
+              </div>
+            )}
+          </section>
+
+          <section className="card card-ai" aria-labelledby="h-ai">
+            <div className="card-head">
+              <h2 id="h-ai">{t('aiTitle')}</h2>
+              <p className="muted">{t('aiIntro')}</p>
+            </div>
+            <div className="ai-form">
+              <label className="ai-key">
+                <span className="small strong">{t('aiKeyLabel')}</span>
+                <span className="ai-key-row">
+                  <input
+                    type={aiShowKey ? 'text' : 'password'}
+                    value={aiKey}
+                    onChange={(e) => setAiKey(e.target.value)}
+                    autoComplete="off"
+                    spellCheck={false}
+                    data-lpignore="true"
+                    placeholder="AIza…"
+                  />
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAiShowKey((v) => !v)} aria-pressed={aiShowKey}>
+                    {aiShowKey ? t('aiHide') : t('aiShow')}
+                  </button>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setAiKey(''); setAiShowKey(false) }} disabled={!aiKey}>
+                    {t('aiClearKey')}
+                  </button>
+                </span>
+              </label>
+              <button type="button" className="btn btn-secondary" onClick={runAiHelp} disabled={aiLoading || !data}>
+                {aiLoading ? t('aiLoading') : t('aiAnalyze')}
+              </button>
+            </div>
+            <p className="muted small ai-note">{t('aiPrivacy')}</p>
+            {!data && <p className="muted small">{t('aiNeedTender')}</p>}
+            {aiError && (
+              <div className="alert alert-error small" role="alert">
+                {t(aiError)} {t('aiFailNote')}
+              </div>
+            )}
+            {aiLoading && <p className="muted small" role="status">{t('aiLoading')}</p>}
+            {aiResult && (
+              <div className="ai-result" role="region" aria-label={t('aiResultTitle')}>
+                <div className="ai-result-head">
+                  <strong>{t('aiResultTitle')}</strong>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAiResult('')}>{t('aiClearResult')}</button>
+                </div>
+                <div className="ai-text">{aiResult.replace(/\*\*/g, '')}</div>
+                <p className="ai-disclaimer small">{t('aiDisclaimer')}</p>
               </div>
             )}
           </section>

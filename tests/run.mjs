@@ -8,6 +8,7 @@ import { parseRequirements } from '../src/lib/requirements.js'
 import { evaluate, requirementStatus, STATUS } from '../src/lib/status.js'
 import { inspectPdf, buildPackage, packageFileName, planPackage, parsePageList, isPng } from '../src/lib/pdf.js'
 import { deflateSync } from 'node:zlib'
+import { analyzeTender, buildTenderSummary, buildPrompt } from '../src/lib/ai.js'
 import { suggestMatches } from '../src/lib/suggest.js'
 
 const fx = (n) => new URL(`./fixtures/${n}`, import.meta.url)
@@ -238,6 +239,49 @@ await test('footer band never covers full-bleed content (sizes, rotations, crop 
       }
     }
   }
+})
+
+await test('AI help: metadata only, key only in header, graceful failures (mocked Gemini)', async () => {
+  const byName = Object.fromEntries(files.map((f) => [f.id, f]))
+  const ev = evaluate(requirements, { ...matches, R01: undefined }, { 'bank_solvency.pdf': '2026-12-31' }, tender.deadlineIso)
+  const dupGroups = {}
+  for (const f of files) (dupGroups[f.hash] ||= []).push(f)
+  const summary = buildTenderSummary({ tender, rows: ev.rows, files, fileById: byName, dupGroups, ready: ev.ready, lang: 'en' })
+  const json = JSON.stringify(summary)
+  assert.ok(!json.includes('%PDF') && !json.includes('bytes') && !json.includes('hash'), 'summary has no file content')
+  assert.equal(summary.requirements.find((r) => r.id === 'R01').status, 'MISSING')
+  assert.ok(summary.uploaded_files.find((f) => f.name === 'experience_cert.pdf').duplicate_of.includes('experience_cert (1).pdf'))
+  assert.ok(buildPrompt(summary, 'bn').includes('Bangla'))
+
+  const KEY = 'test-key-not-real-123'
+  const calls = []
+  const reply = (status, body) => async (url, init) => { calls.push({ url, init }); return { ok: status < 300, status, json: async () => body } }
+  const run = (fetchImpl, extra = {}) => analyzeTender({ apiKey: KEY, summary, lang: 'en', fetchImpl, ...extra })
+  const keyOf = async (p) => p.then(() => 'ok', (e) => e.key)
+
+  // no key: no request at all
+  assert.equal(await keyOf(analyzeTender({ apiKey: '  ', summary, lang: 'en', fetchImpl: reply(200, {}) })), 'errAiNoKey')
+  assert.equal(calls.length, 0)
+  // success
+  const text = await run(reply(200, { candidates: [{ content: { parts: [{ text: 'Overall readiness: 1 blocking issue.' }] } }] }))
+  assert.equal(text, 'Overall readiness: 1 blocking issue.')
+  const c = calls.at(-1)
+  assert.ok(!c.url.includes(KEY) && !c.init.body.includes(KEY), 'key never in URL or body')
+  assert.equal(c.init.headers['x-goog-api-key'], KEY)
+  assert.ok(!c.init.body.includes('%PDF'), 'no PDF bytes sent')
+  // failures map to friendly keys and never leak the key
+  assert.equal(await keyOf(run(reply(400, { error: { status: 'INVALID_ARGUMENT', details: [{ reason: 'API_KEY_INVALID' }] } }))), 'errAiKey')
+  assert.equal(await keyOf(run(reply(403, {}))), 'errAiKey')
+  assert.equal(await keyOf(run(reply(429, {}))), 'errAiQuota')
+  assert.equal(await keyOf(run(reply(503, {}))), 'errAiUnavailable')
+  assert.equal(await keyOf(run(reply(200, { candidates: [] }))), 'errAiBadResponse')
+  assert.equal(await keyOf(run(async () => { throw new TypeError('Failed to fetch') })), 'errAiNetwork')
+  assert.equal(await keyOf(run((url, init) => new Promise((_, rej) => init.signal.addEventListener('abort', () => rej(Object.assign(new Error('x'), { name: 'AbortError' })))), { timeoutMs: 50 })), 'errAiTimeout')
+  // unavailable alias falls back to the pinned model
+  const seen = []
+  const fallback = async (url) => { seen.push(url); return url.includes('flash-latest') ? { ok: false, status: 404, json: async () => ({}) } : { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: 'ok' }] } }] }) } }
+  assert.equal(await run(fallback), 'ok')
+  assert.equal(seen.length, 2)
 })
 
 console.log(`\n${passed} tests passed`)
