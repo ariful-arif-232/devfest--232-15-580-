@@ -21,7 +21,7 @@ Requires Node.js 20+.
 npm install
 npm run dev        # http://localhost:5173
 npm run build      # production build in dist/
-npm test           # logic + PDF tests (generates synthetic fixtures; uses pdftotext from poppler-utils)
+npm test           # logic + PDF unit tests on generated test fixtures (needs pdftotext from poppler-utils)
 ```
 
 Optional browser test: run `npm run dev`, then `node tests/e2e.cjs` (requires Playwright).
@@ -57,12 +57,28 @@ Optional browser test: run `npm run dev`, then `node tests/e2e.cjs` (requires Pl
 
 ## Output
 
-- [`output/T-2026-0417_Package.pdf`](output/T-2026-0417_Package.pdf): a resolved sample package with 1 cover page and 15 document pages, 16 pages in total. Every page has the `T-2026-0417 | Page X of 16` footer.
-- `screenshots/`: document statuses in English with blocking issues (`statuses-blocking.png`), the resolved state (`statuses-en.png`), Bangla (`statuses-bn.png`), mobile (`mobile.png`), and after generation (`generated-en.png`).
+- [`output/T-2026-0417_Package.pdf`](output/T-2026-0417_Package.pdf) was generated from the official contest sample pack (`sample-pack/requirements.json` and `sample-pack/documents/`). It was produced through the deployed app's normal upload, match and generate workflow. The sample was resolved as follows:
+
+  | # | Requirement | File | Expiry | Status |
+  |---|---|---|---|---|
+  | 1 | Trade License | `trade_license_2026.pdf` | 2027-06-30 | OK |
+  | 2 | TIN Certificate | `03_tin_certificate.pdf` | — | OK |
+  | 3 | VAT Registration Certificate | `04_vat_certificate.pdf` | — | OK |
+  | 4 | Bank Solvency Certificate | `bank_solvency.pdf` | 2026-12-31 | OK |
+  | 5 | Experience Certificate | `experience_cert.pdf` (one of the two identical copies) | — | OK |
+  | 6 | Audited Financial Statement | — | — | Not provided (optional) |
+  | 7 | Manufacturer's Authorization | — | — | Not provided (optional) |
+  | 8 | Technical Proposal | `02_technical_proposal.pdf` | — | OK |
+  | 9 | Financial Proposal | `01_financial_proposal.pdf` | — | OK |
+  | 10 | Signed Declaration | `scan_0042.pdf` | — | OK |
+
+  In the same run, `company_logo.png` was rejected as a non-PDF file. `experience_cert.pdf` and `experience_cert (1).pdf` were flagged as exact-content duplicates. `trade_license_2025.pdf` (expiry 2025-06-30) showed as Expired before it was replaced.
+
+  The package has 16 pages: 1 cover page and 15 source pages. Every page carries `T-2026-0417 | Page X of 16`. Every source page was checked against the original file by rendering and comparing pixels. All pages are present, in the order above, unchanged above the footer strip. The footer sits in the blank bottom margin; on the scanned declaration, only the paper background is behind it.
+- `screenshots/` holds screenshots of the official sample pack: statuses with blocking issues (`statuses-blocking.png`), the resolved ready state (`statuses-en.png`), Bangla (`statuses-bn.png`), mobile (`mobile.png`), and after generation (`generated-en.png`).
 
 ## Known issues
 
-- The official sample-pack PDFs were not available inside the build environment. The output PDF and screenshots were therefore made from a synthetic test pack (`tests/make-fixtures.mjs`). It mirrors the described sample: the same tender, requirement list, file names, expiry dates, duplicate pair, non-PDF logo, and 15 required source pages. The app itself contains no sample-specific logic.
 - PDFs encrypted with only an owner password are treated as password-protected and rejected, because pdf-lib cannot decrypt them.
 - The cover uses the standard Helvetica font, which only covers Latin characters. Any other characters in English tender fields are replaced with `?` on the cover; the web UI shows them correctly.
 - The date picker's display format follows the browser's locale. Values are always stored and compared as `YYYY-MM-DD`.

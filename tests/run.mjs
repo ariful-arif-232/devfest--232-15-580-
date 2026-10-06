@@ -1,6 +1,8 @@
 // Run: node tests/make-fixtures.mjs && node tests/run.mjs
 import assert from 'node:assert/strict'
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { parseRequirements } from '../src/lib/requirements.js'
 import { evaluate, requirementStatus, STATUS } from '../src/lib/status.js'
@@ -88,8 +90,8 @@ await test('package: order, page count, footer on every page', async () => {
   const out = await buildPackage(tender, docs)
   assert.equal(out.total, 16)
   assert.equal(packageFileName(tender.tender_id), 'T-2026-0417_Package.pdf')
-  mkdirSync(new URL('../output/', import.meta.url), { recursive: true })
-  const path = new URL('../output/T-2026-0417_Package.pdf', import.meta.url).pathname
+  // Written to the OS temp dir so tests never touch the official output/ package.
+  const path = join(tmpdir(), 'tpb-test-package.pdf')
   writeFileSync(path, out.bytes)
   const text = execFileSync('pdftotext', ['-layout', path, '-']).toString()
   const pages = text.split('\f').filter((p, i, a) => i < a.length - 1 || p.trim())
@@ -108,7 +110,7 @@ await test('rotated pages and odd tender ids still get footers', async () => {
   const t2 = { ...tender, tender_id: 'LGED/2027/Q-88', title: 'Bangla বাংলা title “quoted”' }
   const out = await buildPackage(t2, [{ title: 'A very long document title '.repeat(8), fileName: 'x'.repeat(200) + '.pdf', bytes: rot.bytes }])
   assert.equal(out.total, 3)
-  const tmp = '/tmp/rot-test.pdf'
+  const tmp = join(tmpdir(), 'tpb-rot-test.pdf')
   writeFileSync(tmp, out.bytes)
   const text = execFileSync('pdftotext', [tmp, '-']).toString()
   for (let i = 1; i <= 3; i++) assert.ok(text.includes(`LGED/2027/Q-88 | Page ${i} of 3`))
