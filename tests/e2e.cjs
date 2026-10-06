@@ -36,6 +36,7 @@ const shots = process.argv[3] === 'shots'
   await page.selectOption('#rm-R01', { label: 'trade_license_2025.pdf' })
   await page.fill('#ex-R01', '2025-06-30')
   check((await page.textContent('#req-R01 .badge')) === 'Expired', 'expired trade license')
+  if (shots) { await page.evaluate(() => window.scrollTo(0, document.querySelector('#step-match').offsetTop - 140)); await page.waitForTimeout(300); await page.screenshot({ path: path.join(ROOT, 'screenshots/statuses-blocking.png') }) }
   await page.fill('#ex-R01', '2026-10-20')
   check((await page.textContent('#req-R01 .badge')) === 'OK', 'expiry equal to deadline is OK')
   await page.selectOption('#rm-R01', { label: 'trade_license_2026.pdf' })

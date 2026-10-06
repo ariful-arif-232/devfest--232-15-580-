@@ -29,9 +29,9 @@
 /* ---------- layout ---------- */
 .layout { max-width: 1280px; margin: 0 auto; padding: 24px; display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 24px; align-items: start; }
 .main-col { display: grid; gap: 24px; min-width: 0; }
-.side-col { min-width: 0; }
+.side-col { min-width: 0; align-self: stretch; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 24px; min-width: 0; }
-.card-sticky { position: sticky; top: 130px; display: grid; gap: 14px; }
+.card-sticky { position: sticky; top: 130px; display: grid; gap: 14px; max-height: calc(100vh - 150px); overflow-y: auto; }
 .card-head { margin-bottom: 18px; display: grid; gap: 4px; }
 .card-head p { margin: 4px 0 0; max-width: 70ch; }
 .eyebrow { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--brand); }
