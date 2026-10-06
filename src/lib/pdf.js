@@ -249,6 +249,7 @@ export async function buildPackage(tender, documents) {
 }
 
 export function packageFileName(tenderId) {
+  // eslint-disable-next-line no-control-regex
   const safe = String(tenderId).replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '_').trim() || 'Tender'
   return `${safe}_Package.pdf`
 }

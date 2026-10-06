@@ -304,7 +304,7 @@ export default function App() {
 
   return (
     <div className={`app lang-${lang}`}>
-      <a className="skip-link" href="#main">Skip to content</a>
+      <a className="skip-link" href="#main">{t('skip')}</a>
       <header className="topbar">
         <div className="topbar-inner">
           <div className="brand">
@@ -321,7 +321,7 @@ export default function App() {
             <button type="button" aria-pressed={lang === 'bn'} onClick={() => setLang('bn')} lang="bn">বাংলা</button>
           </div>
         </div>
-        <nav className="stepper" aria-label="Workflow">
+        <nav className="stepper" aria-label={t('workflow')}>
           <ol>
             {steps.map((s) => (
               <li key={s.n} className={s.done ? 'is-done' : ''}>
@@ -568,8 +568,9 @@ export default function App() {
                           </div>
                         )}
                         {fileId && (
-                          <div className="muted small">
-                            {fileById[fileId].pages === 1 ? t('page1') : t('pages', { n: fileById[fileId].pages })}
+                          <div className="matched-file small">
+                            <span className="filename">{fileById[fileId].name}</span>
+                            <span className="muted"> · {fileById[fileId].pages === 1 ? t('page1') : t('pages', { n: fileById[fileId].pages })}</span>
                           </div>
                         )}
                       </div>

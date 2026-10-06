@@ -118,7 +118,7 @@ input[aria-invalid='true'] { border-color: var(--bad); background: #fffafa; }
 .suggest-box { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 10px 14px; border: 1px solid #d8d3f3; background: var(--info-soft); border-radius: 8px; margin-bottom: 14px; }
 .suggest-inline { margin-top: 6px; display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; font-size: 0.82rem; color: var(--info); overflow-wrap: anywhere; }
 .req-table { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
-.req-row { display: grid; grid-template-columns: 44px minmax(0, 1.3fr) minmax(0, 1.4fr) 170px 150px; gap: 14px; align-items: start; padding: 14px; border-top: 1px solid var(--line); background: var(--surface); transition: background-color 0.2s; }
+.req-row { display: grid; grid-template-columns: 36px minmax(0, 1.1fr) minmax(0, 1.6fr) 160px 140px; gap: 14px; align-items: start; padding: 14px; border-top: 1px solid var(--line); background: var(--surface); transition: background-color 0.2s; }
 .req-row:first-child { border-top: 0; }
 .req-header { background: var(--surface-2); font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); padding-top: 10px; padding-bottom: 10px; align-items: center; }
 .lang-bn .req-header { text-transform: none; letter-spacing: 0; font-size: 0.82rem; }
@@ -135,6 +135,8 @@ input[aria-invalid='true'] { border-color: var(--bad); background: #fffafa; }
 .req-status { padding-top: 7px; }
 .select-row { display: flex; gap: 6px; align-items: center; min-width: 0; }
 .select-row select { flex: 1; }
+.matched-file { overflow-wrap: anywhere; }
+.matched-file .filename { font-weight: 500; color: var(--ink-2); }
 
 /* ---------- side ---------- */
 .side-col h2 { font-size: 1.15rem; }
