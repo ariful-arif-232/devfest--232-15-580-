@@ -136,22 +136,26 @@ function drawCover(page, fonts, tender, entries, generatedOn) {
   page.drawText('Included Documents', { x: M, y, size: 13, font: bold, color: INK })
   y -= 20
 
-  // Shrink the list until it fits above the footer area.
-  const bottom = 48
+  // Shrink the list until it fits above the seal band and footer. If it still does not fit,
+  // drop the file-name lines so every included document is always listed.
+  const bottom = SEAL_BAND_TOP + 4
   const colNo = 26
   const colPages = 86
   let size = 10
   let layout
-  for (; size >= 6; size -= 0.5) {
-    const lh = size * 1.35
-    layout = entries.map((e) => {
-      const title = wrap(bold, safeText(bold, e.title), size, width - colNo - colPages)
-      const file = wrap(regular, safeText(regular, e.fileName), size - 1, width - colNo - colPages)
-      return { e, title, file, h: (title.length + file.length) * lh + size * 0.6 }
-    })
-    const total = layout.reduce((s, l) => s + l.h, size * 1.8)
-    if (y - total >= bottom) break
+  fitting: for (const withFiles of [true, false]) {
+    for (size = 10; size >= 6; size -= 0.5) {
+      const lh = size * 1.35
+      layout = entries.map((e) => {
+        const title = wrap(bold, safeText(bold, e.title), size, width - colNo - colPages)
+        const file = withFiles ? wrap(regular, safeText(regular, e.fileName), size - 1, width - colNo - colPages) : []
+        return { e, title, file, h: (title.length + file.length) * lh + size * 0.6 }
+      })
+      const total = layout.reduce((s, l) => s + l.h, size * 1.8)
+      if (y - total >= bottom) break fitting
+    }
   }
+  size = Math.max(size, 6)
   const lh = size * 1.35
 
   page.drawText('#', { x: M, y, size: size - 1, font: bold, color: MUTED })
@@ -291,25 +295,28 @@ export function parsePageList(text, max) {
   return [...out].sort((x, y) => x - y)
 }
 
-export const SEAL_SIZES = { s: 70, m: 100, l: 140 }
+export const SEAL_SIZES = { s: 48, m: 60, l: 72 }
+// Seals live in the bottom margin band, between the footer and normal page content.
+const SEAL_BOTTOM = 30
+const SEAL_BAND_TOP = SEAL_BOTTOM + SEAL_SIZES.l
 
-// Places the seal in a visual corner of the page (honouring /Rotate), clear of the footer strip.
+// Places the seal in a bottom corner of the visual page (honouring /Rotate), above the footer strip
+// and inside the bottom margin band so it does not cover the letterhead or body text.
 function drawSeal(page, image, position, sizePt) {
   const box = page.getCropBox()
   const rot = (((page.getRotation().angle || 0) % 360) + 360) % 360
   const sideways = rot === 90 || rot === 270
   const VW = sideways ? box.height : box.width
   const VH = sideways ? box.width : box.height
-  let w = Math.min(sizePt, VW * 0.4)
-  let h = (w * image.height) / image.width
-  if (h > VH * 0.3) {
-    h = VH * 0.3
-    w = (h * image.width) / image.height
-  }
+  // Fit inside a sizePt x sizePt box (and a sane share of small pages), preserving aspect ratio.
+  const maxW = Math.min(sizePt * 1.6, VW * 0.3)
+  const maxH = Math.min(sizePt, VH * 0.1)
+  const k = Math.min(maxW / image.width, maxH / image.height)
+  const w = image.width * k
+  const h = image.height * k
   const margin = 24
-  const bottom = 36 // keeps the seal above the footer
-  const vx = position.endsWith('left') ? margin : VW - margin - w
-  const vy = position.startsWith('bottom') ? bottom : VH - margin - h
+  const vx = position === 'bottom-left' ? margin : VW - margin - w
+  const vy = SEAL_BOTTOM
   let x, y
   if (rot === 90) {
     x = box.x + box.width - vy

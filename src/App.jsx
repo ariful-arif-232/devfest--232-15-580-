@@ -311,7 +311,7 @@ export default function App() {
     if (!file) return
     const bytes = new Uint8Array(await file.arrayBuffer())
     if (!isPng(bytes)) {
-      setSealError(t('errSealPng'))
+      setSealError('errSealPng')
       return
     }
     setSealError('')
@@ -878,7 +878,7 @@ export default function App() {
                         <label>
                           <span className="small">{t('sealPos')}</span>
                           <select value={sealPos} onChange={(e) => setSealPos(e.target.value)}>
-                            {['bottom-right', 'bottom-left', 'top-right', 'top-left'].map((p) => <option key={p} value={p}>{t(`pos_${p}`)}</option>)}
+                            {['bottom-right', 'bottom-left'].map((p) => <option key={p} value={p}>{t(`pos_${p}`)}</option>)}
                           </select>
                         </label>
                         <label>
@@ -893,7 +893,7 @@ export default function App() {
                       </p>
                     </>
                   )}
-                  {sealError && <p className="small seal-err" role="alert">{sealError}</p>}
+                  {sealError && <p className="small seal-err" role="alert">{t(sealError)}</p>}
                 </section>
 
                 <p className="muted small">{t('generateHelp', { id: data.tender.tender_id })}</p>

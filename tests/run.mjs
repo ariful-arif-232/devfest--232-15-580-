@@ -173,7 +173,18 @@ await test('seal: page list parsing and placement on selected pages only', async
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const i = offset + (y * W + x) * 3; if (ppm[i] > 200 && ppm[i + 1] < 60 && ppm[i + 2] < 60) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y) } }
   assert.ok(maxX > 0, 'seal rendered')
   assert.ok(minX > W / 2 && maxY > H / 2, `seal in bottom-right (${minX},${minY})-(${maxX},${maxY}) of ${W}x${H}`)
-  assert.ok(maxY < H - 0.5 * 30 && maxX < W, 'seal stays above footer and inside page')
+  // Footer box spans 9-22pt from the bottom; the seal must end above 24pt (0.5 px per pt here).
+  assert.ok(maxY < H - 0.5 * 24 && maxX < W, 'seal stays above footer and inside page')
+})
+
+await test('cover lists every included document even for 30 documents', async () => {
+  const tin = files.find((f) => f.name === '03_tin_certificate.pdf')
+  const docs = Array.from({ length: 30 }, (_, i) => ({ title: `Requirement number ${i + 1} supporting certificate`, fileName: `document_file_${i + 1}_scan.pdf`, bytes: tin.bytes }))
+  const out = await buildPackage(tender, docs)
+  const path = join(tmpdir(), 'tpb-many-test.pdf')
+  writeFileSync(path, out.bytes)
+  const cover = execFileSync('pdftotext', ['-f', '1', '-l', '1', path, '-']).toString()
+  for (let i = 1; i <= 30; i++) assert.ok(cover.includes(`Requirement number ${i} supporting`), `cover entry ${i}`)
 })
 
 console.log(`\n${passed} tests passed`)
