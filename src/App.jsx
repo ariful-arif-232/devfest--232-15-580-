@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { makeT, localDigits } from './lib/i18n.js'
 import { parseRequirements, toIsoDate } from './lib/requirements.js'
 import { evaluate, STATUS } from './lib/status.js'
-import { inspectPdf, looksLikePdf, buildPackage, packageFileName, planPackage, MAX_FILES, MAX_TOTAL_BYTES } from './lib/pdf.js'
+import { inspectPdf, looksLikePdf, buildPackage, packageFileName, planPackage, parsePageList, isPng, MAX_FILES, MAX_TOTAL_BYTES } from './lib/pdf.js'
 import { suggestMatches } from './lib/suggest.js'
 import { checklistCsv } from './lib/csv.js'
 import { saveProject, loadProject, clearProject, peekProject } from './lib/store.js'
@@ -87,6 +87,11 @@ export default function App() {
   const [toast, setToast] = useState(null)
   const [withIndex, setWithIndex] = useState(false)
   const [saved, setSaved] = useState(null)
+  const [seal, setSeal] = useState(null)
+  const [sealPages, setSealPages] = useState('')
+  const [sealPos, setSealPos] = useState('bottom-right')
+  const [sealSize, setSealSize] = useState('m')
+  const [sealError, setSealError] = useState('')
 
   useEffect(() => {
     peekProject().then(setSaved)
@@ -108,6 +113,7 @@ export default function App() {
   }, [toast])
 
   useEffect(() => () => result && URL.revokeObjectURL(result.url), [result])
+  useEffect(() => () => seal && URL.revokeObjectURL(seal.url), [seal])
 
   const requirements = useMemo(() => data?.requirements ?? [], [data])
   const reqById = useMemo(() => Object.fromEntries(requirements.map((r) => [r.id, r])), [requirements])
@@ -138,8 +144,8 @@ export default function App() {
   )
 
   const signature = useMemo(
-    () => JSON.stringify([data?.tender.tender_id, matches, expiryByFile, files.map((f) => f.id), withIndex, withIndex ? lang : '']),
-    [data, matches, expiryByFile, files, withIndex, lang],
+    () => JSON.stringify([data?.tender.tender_id, matches, expiryByFile, files.map((f) => f.id), withIndex, withIndex ? lang : '', seal?.url, sealPages, sealPos, sealSize]),
+    [data, matches, expiryByFile, files, withIndex, lang, seal, sealPages, sealPos, sealSize],
   )
   const resultFresh = result && result.signature === signature
 
@@ -254,7 +260,8 @@ export default function App() {
       const docs = evaluation.rows
         .filter((r) => r.fileId)
         .map((r) => ({ title: r.req.title_en, fileName: fileById[r.fileId].name, bytes: fileById[r.fileId].bytes }))
-      const out = await buildPackage(data.tender, docs, { index: withIndex ? await indexOptions() : null })
+      const sealOpt = seal && sealList?.length ? { png: seal.bytes, pages: sealList, position: sealPos, size: sealSize } : null
+      const out = await buildPackage(data.tender, docs, { index: withIndex ? await indexOptions() : null, seal: sealOpt })
       const url = URL.createObjectURL(new Blob([out.bytes], { type: 'application/pdf' }))
       setResult({ url, name: packageFileName(data.tender.tender_id), total: out.total, docs: docs.length, signature })
     } catch (err) {
@@ -297,6 +304,18 @@ export default function App() {
     a.click()
     a.remove()
     setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+
+  async function chooseSeal(fileList) {
+    const file = fileList[0]
+    if (!file) return
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    if (!isPng(bytes)) {
+      setSealError(t('errSealPng'))
+      return
+    }
+    setSealError('')
+    setSeal({ name: file.name, bytes, url: URL.createObjectURL(new Blob([bytes], { type: 'image/png' })) })
   }
 
   async function saveWork() {
@@ -363,6 +382,8 @@ export default function App() {
   const plan = planPackage(matchedRows.map((r) => fileById[r.fileId]?.pages || 0), withIndex)
   const mandatoryRows = evaluation ? evaluation.rows.filter((r) => r.req.mandatory) : []
   const optionalRows = evaluation ? evaluation.rows.filter((r) => !r.req.mandatory) : []
+  const sealList = seal ? parsePageList(sealPages, plan.total) : null
+  const sealInvalid = !!seal && (!sealList || sealList.length === 0)
   const pageLabel = (a, b) => (a === b ? t('mfPage', { a }) : t('mfRange', { a, b }))
   const suggestionEntries = Object.entries(suggestions)
   const steps = [
@@ -832,6 +853,49 @@ export default function App() {
                   </span>
                 </label>
 
+                <section className="seal-box" aria-labelledby="h-seal">
+                  <h3 id="h-seal">{t('sealTitle')}</h3>
+                  {!seal ? (
+                    <>
+                      <label className="btn btn-ghost btn-sm seal-choose">
+                        {t('sealChoose')}
+                        <input type="file" accept="image/png,.png" className="sr-only" onChange={(e) => { chooseSeal(e.target.files); e.target.value = '' }} />
+                      </label>
+                      <p className="muted small">{t('sealHint')}</p>
+                    </>
+                  ) : (
+                    <>
+                      <div className="seal-head">
+                        <img src={seal.url} alt={t('sealPreviewAlt')} className="seal-preview" />
+                        <span className="filename small">{seal.name}</span>
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setSeal(null); setSealPages('') }}>{t('remove')}</button>
+                      </div>
+                      <div className="seal-fields">
+                        <label>
+                          <span className="small">{t('sealPages', { max: plan.total })}</span>
+                          <input type="text" inputMode="numeric" value={sealPages} placeholder={`1, ${plan.total}`} onChange={(e) => setSealPages(e.target.value)} aria-invalid={sealInvalid} />
+                        </label>
+                        <label>
+                          <span className="small">{t('sealPos')}</span>
+                          <select value={sealPos} onChange={(e) => setSealPos(e.target.value)}>
+                            {['bottom-right', 'bottom-left', 'top-right', 'top-left'].map((p) => <option key={p} value={p}>{t(`pos_${p}`)}</option>)}
+                          </select>
+                        </label>
+                        <label>
+                          <span className="small">{t('sealSize')}</span>
+                          <select value={sealSize} onChange={(e) => setSealSize(e.target.value)}>
+                            {['s', 'm', 'l'].map((z) => <option key={z} value={z}>{t(`size_${z}`)}</option>)}
+                          </select>
+                        </label>
+                      </div>
+                      <p className={`small ${sealInvalid ? 'seal-err' : 'seal-ok'}`} role="status">
+                        {sealInvalid ? t('errSealPages', { max: plan.total }) : t('sealWill', { list: sealList.map((n) => num(n)).join(', ') })}
+                      </p>
+                    </>
+                  )}
+                  {sealError && <p className="small seal-err" role="alert">{sealError}</p>}
+                </section>
+
                 <p className="muted small">{t('generateHelp', { id: data.tender.tender_id })}</p>
                 {evaluation.ready && (
                   <p className="small include-line">
@@ -841,7 +905,7 @@ export default function App() {
                   </p>
                 )}
 
-                <button type="button" className="btn btn-primary btn-block btn-lg" disabled={!evaluation.ready || generating} onClick={generate} aria-describedby="gen-state">
+                <button type="button" className="btn btn-primary btn-block btn-lg" disabled={!evaluation.ready || generating || sealInvalid} onClick={generate} aria-describedby="gen-state">
                   {generating ? t('generating') : t('generate')}
                 </button>
                 <span id="gen-state" className="sr-only">{evaluation.ready ? t('ready') : t('blockingN', { n: evaluation.blocking.length })}</span>

@@ -6,7 +6,8 @@ import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { parseRequirements } from '../src/lib/requirements.js'
 import { evaluate, requirementStatus, STATUS } from '../src/lib/status.js'
-import { inspectPdf, buildPackage, packageFileName, planPackage } from '../src/lib/pdf.js'
+import { inspectPdf, buildPackage, packageFileName, planPackage, parsePageList, isPng } from '../src/lib/pdf.js'
+import { deflateSync } from 'node:zlib'
 import { suggestMatches } from '../src/lib/suggest.js'
 
 const fx = (n) => new URL(`./fixtures/${n}`, import.meta.url)
@@ -135,6 +136,44 @@ await test('page plan and index page numbering', async () => {
   const expectStarts = [['Trade License', 3], ['TIN Certificate', 4], ['VAT Registration Certificate', 5], ['Bank Solvency Certificate', 6], ['Experience Certificate', 7], ['Technical Proposal', 9], ['Financial Proposal', 13], ['Signed Declaration', 16]]
   for (const [title, start] of expectStarts) assert.match(idx, new RegExp(`${title}\\s+${start}\\s*$`, 'm'), title)
   assert.ok(pages[2].includes('Trade License 2026') && pages[8].includes('Technical Proposal'))
+})
+
+// Minimal solid red RGBA PNG for seal tests.
+function redPng(w, h) {
+  const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0 })
+  const crc = (buf) => { let c = 0xffffffff; for (const b of buf) c = crcTable[(c ^ b) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0 }
+  const chunk = (type, data) => { const len = Buffer.alloc(4); len.writeUInt32BE(data.length); const td = Buffer.concat([Buffer.from(type), data]); const c = Buffer.alloc(4); c.writeUInt32BE(crc(td)); return Buffer.concat([len, td, c]) }
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 6
+  const raw = Buffer.alloc((w * 4 + 1) * h); for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) raw.set([255, 0, 0, 255], y * (w * 4 + 1) + 1 + x * 4)
+  return new Uint8Array(Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]))
+}
+
+await test('seal: page list parsing and placement on selected pages only', async () => {
+  assert.deepEqual(parsePageList('1, 3-4 3', 5), [1, 3, 4])
+  assert.equal(parsePageList('0', 5), null)
+  assert.equal(parsePageList('2-9', 5), null)
+  assert.equal(parsePageList('a', 5), null)
+  const png = redPng(40, 20)
+  assert.ok(isPng(png) && !isPng(new Uint8Array([1, 2, 3])))
+  const rot = await inspectPdf(fileOf('rotated_landscape.pdf'))
+  const tin = files.find((f) => f.name === '03_tin_certificate.pdf')
+  const out = await buildPackage(tender, [{ title: 'TIN', fileName: 'a.pdf', bytes: tin.bytes }, { title: 'Rot', fileName: 'b.pdf', bytes: rot.bytes }], { seal: { png, pages: [1, 3], position: 'bottom-right', size: 'm' } })
+  const path = join(tmpdir(), 'tpb-seal-test.pdf')
+  writeFileSync(path, out.bytes)
+  const list = execFileSync('pdfimages', ['-list', path]).toString().trim().split('\n').slice(2).map((l) => Number(l.trim().split(/\s+/)[0]))
+  assert.deepEqual(list, [1, 3])
+  const text = execFileSync('pdftotext', [path, '-']).toString()
+  for (let i = 1; i <= 4; i++) assert.ok(text.includes(`T-2026-0417 | Page ${i} of 4`))
+  // Rendered: red pixels on page 3 must sit in the visual bottom-right, above the footer strip.
+  const ppm = execFileSync('pdftoppm', ['-r', '36', '-f', '3', '-l', '3', '-singlefile', path]) // P6 at 0.5 px/pt
+  const header = ppm.toString('latin1', 0, 30).split(/\s+/)
+  const W = Number(header[1]); const H = Number(header[2])
+  const offset = ppm.indexOf(Buffer.from('255\n')) + 4
+  let minX = W, minY = H, maxX = 0, maxY = 0
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const i = offset + (y * W + x) * 3; if (ppm[i] > 200 && ppm[i + 1] < 60 && ppm[i + 2] < 60) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y) } }
+  assert.ok(maxX > 0, 'seal rendered')
+  assert.ok(minX > W / 2 && maxY > H / 2, `seal in bottom-right (${minX},${minY})-(${maxX},${maxY}) of ${W}x${H}`)
+  assert.ok(maxY < H - 0.5 * 30 && maxX < W, 'seal stays above footer and inside page')
 })
 
 console.log(`\n${passed} tests passed`)

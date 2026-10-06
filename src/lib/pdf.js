@@ -272,7 +272,63 @@ async function drawIndex(out, page, fonts, tender, index, entries) {
   }
 }
 
+export function isPng(bytes) {
+  const sig = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+  return bytes.length > 8 && sig.every((b, i) => bytes[i] === b)
+}
+
+// Parses "1, 3-5" into sorted unique page numbers; returns null when any part is invalid or out of range.
+export function parsePageList(text, max) {
+  const out = new Set()
+  for (const part of String(text).split(/[\s,]+/).filter(Boolean)) {
+    const m = part.match(/^(\d+)(?:-(\d+))?$/)
+    if (!m) return null
+    const a = Number(m[1])
+    const b = m[2] ? Number(m[2]) : a
+    if (a < 1 || b < a || b > max) return null
+    for (let n = a; n <= b; n++) out.add(n)
+  }
+  return [...out].sort((x, y) => x - y)
+}
+
+export const SEAL_SIZES = { s: 70, m: 100, l: 140 }
+
+// Places the seal in a visual corner of the page (honouring /Rotate), clear of the footer strip.
+function drawSeal(page, image, position, sizePt) {
+  const box = page.getCropBox()
+  const rot = (((page.getRotation().angle || 0) % 360) + 360) % 360
+  const sideways = rot === 90 || rot === 270
+  const VW = sideways ? box.height : box.width
+  const VH = sideways ? box.width : box.height
+  let w = Math.min(sizePt, VW * 0.4)
+  let h = (w * image.height) / image.width
+  if (h > VH * 0.3) {
+    h = VH * 0.3
+    w = (h * image.width) / image.height
+  }
+  const margin = 24
+  const bottom = 36 // keeps the seal above the footer
+  const vx = position.endsWith('left') ? margin : VW - margin - w
+  const vy = position.startsWith('bottom') ? bottom : VH - margin - h
+  let x, y
+  if (rot === 90) {
+    x = box.x + box.width - vy
+    y = box.y + vx
+  } else if (rot === 180) {
+    x = box.x + box.width - vx
+    y = box.y + box.height - vy
+  } else if (rot === 270) {
+    x = box.x + vy
+    y = box.y + box.height - vx
+  } else {
+    x = box.x + vx
+    y = box.y + vy
+  }
+  page.drawImage(image, { x, y, width: w, height: h, rotate: degrees(rot) })
+}
+
 // documents: [{ title, fileName, bytes }] already in final order.
+// options.seal: null, or { png, pages: [final page numbers], position, size }.
 // options.index: null, or { heading, columns: { document, start }, labels[] } (labels are text or images).
 export async function buildPackage(tender, documents, options = {}) {
   const out = await PDFDocument.create()
@@ -301,6 +357,11 @@ export async function buildPackage(tender, documents, options = {}) {
   const pages = out.getPages()
   const total = pages.length
   const id = safeText(regular, tender.tender_id)
+  if (options.seal && options.seal.pages.length) {
+    const image = await out.embedPng(options.seal.png)
+    const size = SEAL_SIZES[options.seal.size] || SEAL_SIZES.m
+    for (const n of options.seal.pages) if (pages[n - 1]) drawSeal(pages[n - 1], image, options.seal.position, size)
+  }
   pages.forEach((page, i) => drawFooter(page, regular, `${id} | Page ${i + 1} of ${total}`))
 
   const bytes = await out.save()
